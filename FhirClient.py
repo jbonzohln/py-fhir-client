@@ -7,13 +7,13 @@ from requests import Response, Session
 from requests_toolbelt.downloadutils import stream
 from logging import getLogger
 
-APPLICATION_JSON_FHIR = "application/json+fhir"
+APPLICATION_JSON_FHIR = 'application/json+fhir'
 
 
 class FhirClient:
     def __init__(self, base_url: str = None, token: str = None, auth_type: str = None):
-        self.logging = getLogger("FhirClient")
-        self.base_url = base_url.removesuffix("/")
+        self.logging = getLogger('FhirClient')
+        self.base_url = base_url.removesuffix('/')
         self.token = token
         self.token_expires_at: datetime = datetime.now()
         self.refresh_token = lambda: ''
@@ -37,14 +37,14 @@ class FhirClient:
     def __headers(self) -> dict:
         if self.__get_token() is not None and self.auth_type is not None:
             return {
-                "Authorization": f"{self.auth_type} {self.__get_token()}",
-                "Accept": APPLICATION_JSON_FHIR,
-                "Content-Type": APPLICATION_JSON_FHIR
+                'Authorization': f'{self.auth_type} {self.__get_token()}',
+                'Accept': APPLICATION_JSON_FHIR,
+                'Content-Type': APPLICATION_JSON_FHIR
             }
         else:
             return {
-                "Accept": APPLICATION_JSON_FHIR,
-                "Content-Type": APPLICATION_JSON_FHIR
+                'Accept': APPLICATION_JSON_FHIR,
+                'Content-Type': APPLICATION_JSON_FHIR
             }
 
     def __async_headers(self) -> dict:
@@ -64,7 +64,10 @@ class FhirClient:
 
         with op(url=url, headers=self.__headers(), params=query_params, data=data) as response:
             response.raise_for_status()
-            return response.json()
+            if response.content:
+                return response.json()
+            else:
+                return {}
 
     def __operation_on_resource(self,
                                 resource_type: str,
@@ -92,11 +95,11 @@ class FhirClient:
             data = json.dumps(body)
 
         if operation is None:
-            return self.__operation(url=f"{self.base_url}/{resource_type}",
+            return self.__operation(url=f'{self.base_url}/{resource_type}',
                                     query_params=query_params,
                                     data=data)
         else:
-            return self.__operation(url=f"{self.base_url}/{resource_type}/{operation}",
+            return self.__operation(url=f'{self.base_url}/{resource_type}/{operation}',
                                     query_params=query_params,
                                     data=data)
 
@@ -124,7 +127,7 @@ class FhirClient:
         else:
             data = json.dumps(body)
 
-        return self.__async_operation(url=f"{self.base_url}/{resource_type}/{resource_id}/{operation}",
+        return self.__async_operation(url=f'{self.base_url}/{resource_type}/{resource_id}/{operation}',
                                       query_params=query_params,
                                       data=data)
 
@@ -138,7 +141,7 @@ class FhirClient:
         else:
             data = json.dumps(body)
 
-        return self.__async_operation(url=f"{self.base_url}/{resource_type}/{operation}",
+        return self.__async_operation(url=f'{self.base_url}/{resource_type}/{operation}',
                                       query_params=query_params,
                                       data=data)
 
@@ -158,17 +161,17 @@ class FhirClient:
 
         encoded_jwt = jwt.encode(
             payload={
-                "iss": client_id,
-                "sub": client_id,
-                "aud": token_endpoint,
-                "exp": datetime.utcnow() + timedelta(hours=1),
-                "jti": str(uuid.uuid4()),
-                "jku": jku
+                'iss': client_id,
+                'sub': client_id,
+                'aud': token_endpoint,
+                'exp': datetime.utcnow() + timedelta(hours=1),
+                'jti': str(uuid.uuid4()),
+                'jku': jku
             },
             key=key,
             algorithm=algorithm,
             headers={
-                "kid": key_id
+                'kid': key_id
             })
 
         with self.session.post(token_endpoint, params={
@@ -182,78 +185,119 @@ class FhirClient:
         }) as response:
             return response.json()
 
-    def get_resource(self, resource_type: str, resource_id: str) -> dict:
-        with self.session.get(url=f"{self.base_url}/{resource_type}/{resource_id}",
+    def read(self, resource_type: str, resource_id: str) -> dict:
+        with self.session.get(url=f'{self.base_url}/{resource_type}/{resource_id}',
                               headers=self.__headers()) as response:
             response.raise_for_status()
             return response.json()
 
-    def get_group(self, group_id: str) -> dict:
-        return self.get_resource("Group", group_id)
-
-    def get_patient(self, patient_id: str) -> dict:
-        return self.get_resource("Patient", patient_id)
-
     def member_remove(self, group_id: str, patient_id: str) -> dict:
-        return self.mutate_group(group_id, patient_id, "$member-remove")
+        return self.mutate_group(group_id, patient_id, '$member-remove')
 
     def member_add(self, group_id: str, patient_id: str):
-        return self.mutate_group(group_id, patient_id, "$member-add")
+        return self.mutate_group(group_id, patient_id, '$member-add')
 
     def mutate_group(self, group_id: str, patient_id: str, operation: str) -> dict:
-        return self.__operation_on_resource(resource_type="Group",
+        return self.__operation_on_resource(resource_type='Group',
                                             resource_id=group_id,
                                             operation=operation,
                                             body={
-                                                "resourceType": "Parameters",
-                                                "id": f"{time.time_ns()}",
-                                                "parameter": [
+                                                'resourceType': 'Parameters',
+                                                'id': f'{time.time_ns()}',
+                                                'parameter': [
                                                     {
-                                                        "name": "patientReference",
-                                                        "valueReference": {
-                                                            "reference": f"{patient_id}",
-                                                            "type": "Patient"
+                                                        'name': 'patientReference',
+                                                        'valueReference': {
+                                                            'reference': f'{patient_id}',
+                                                            'type': 'Patient'
                                                         }
                                                     }
                                                 ]
                                             })
 
-    def search_immunizations(self, patient_id: str):
+    def search(self, resource_type: str, query_params: dict):
         return self.__operation_on_resource_type(
-            resource_type='Immunization',
-            query_params={
-                'patient': patient_id
+            resource_type=resource_type,
+            operation='_search',
+            query_params=query_params
+        )
+
+    def validate(self, resource_type: str, resource, mode: str, profile: str = None):
+        parameter = [
+            {
+                'name': 'resource',
+                'resource': resource
+            }
+        ]
+
+        if mode is not None and len(mode) > 0:
+            parameter.append({
+                'name': 'mode',
+                'valueCode': mode
             })
+
+        if profile is not None and len(profile) > 0:
+            parameter.append({
+                {
+                    'name': 'profile',
+                    'valueCode': profile
+                }
+            })
+
+        return self.__operation_on_resource_type(
+            resource_type=resource_type,
+            operation='$validate',
+            body={
+                'resourceType': 'Parameters',
+                'id': f'{time.time_ns()}',
+                'parameter': parameter
+            }
+        )
+
+    def create(self, resource_type: str, resource: dict):
+        return self.__operation_on_resource_type(resource_type=resource_type, body=resource)
+
+    def update(self, resource_type: str, resource: dict):
+        pass
+
+    def delete(self, resource_type: str, resource_id: str):
+        with self.session.delete(url=f'{self.base_url}/{resource_type}/{resource_id}',
+                                 headers=self.__headers()) as response:
+            response.raise_for_status()
+            if response.content:
+                return response.json()
+            else:
+                return response.content
 
     def patient_match(self, search_criteria: dict, count: int = 3, certain_matches: bool = False) -> dict:
         return self.__operation_on_resource_type(
-            resource_type="Patient",
-            operation="$match",
+            resource_type='Patient',
+            operation='$match',
             body={
-                "resourceType": "Parameters",
-                "id": f"{time.time_ns()}",
-                "parameter": [
+                'resourceType': 'Parameters',
+                'id': f'{time.time_ns()}',
+                'parameter': [
                     {
-                        "name": "resource",
-                        "resource": {
-                            "resourceType": "Patient",
+                        'name': 'resource',
+                        'resource': {
+                            'resourceType': 'Patient',
                             **search_criteria
                         }
                     },
                     {
-                        "name": "count",
-                        "valueInteger": count
+                        'name': 'count',
+                        'valueInteger': count
                     },
                     {
-                        "name": "onlyCertainMatches",
-                        "valueBoolean": certain_matches
+                        'name': 'onlyCertainMatches',
+                        'valueBoolean': certain_matches
                     }
                 ]
             })
 
-    def bulk_patient_export(self, since: datetime = None, types=None):
+    def bulk_patient_export(self, since: datetime = None, types=None, default_polling_time: int = 120):
         if types is None:
-            types = ["Patient"]
+            types = ['Patient']
 
         query_params: dict[str, str] = {
             '_type': ','.join(types)
@@ -264,18 +308,18 @@ class FhirClient:
 
         response = self.__async_operation_on_resource_type(
             resource_type='Patient',
-            operation="$export",
+            operation='$export',
             query_params=query_params)
 
         if response.status_code == 202:
             content_location = response.headers['Content-Location']
-            return self.poll(content_location)
+            return self.poll(content_location, default_polling_time=default_polling_time)
         else:
             return response.json()
 
     def bulk_group_export(self, group_id: str, since: datetime = None, types=None):
         if types is None:
-            types = ["Patient"]
+            types = ['Patient']
 
         query_params: dict[str, str] = {
             '_type': ','.join(types)
@@ -287,7 +331,7 @@ class FhirClient:
         response = self.__async_operation_on_resource(
             resource_type='Group',
             resource_id=group_id,
-            operation="$export",
+            operation='$export',
             query_params=query_params)
 
         if response.status_code == 202:
@@ -296,37 +340,38 @@ class FhirClient:
         else:
             return response.json()
 
-    def bulk_patient_match(self, search_criteria: list, count: int = 3, certain_matches: bool = False) -> dict:
+    def bulk_patient_match(self, search_criteria: list, count: int = 3, certain_matches: bool = False,
+                           default_polling_time: int = 120) -> dict:
         resource_params = [{
-            "name": "resource",
-            "resource": {
-                "resourceType": "Patient",
+            'name': 'resource',
+            'resource': {
+                'resourceType': 'Patient',
                 **sc
             }
         } for sc in search_criteria]
 
         # noinspection PyTypeChecker
-        response = self.__async_operation_on_resource_type(resource_type="Patient",
-                                                           operation="$bulk-match",
+        response = self.__async_operation_on_resource_type(resource_type='Patient',
+                                                           operation='$bulk-match',
                                                            body={
-                                                               "resourceType": "Parameters",
-                                                               "id": f"{time.time_ns()}",
-                                                               "parameter": resource_params + [
-                                                                   {"name": "count", "valueInteger": count},
-                                                                   {"name": "onlyCertainMatches",
-                                                                    "valueBoolean": certain_matches}
+                                                               'resourceType': 'Parameters',
+                                                               'id': f'{time.time_ns()}',
+                                                               'parameter': resource_params + [
+                                                                   {'name': 'count', 'valueInteger': count},
+                                                                   {'name': 'onlyCertainMatches',
+                                                                    'valueBoolean': certain_matches}
                                                                ]
                                                            })
 
         if response.status_code == 202:
             content_location = response.headers['Content-Location']
-            return self.poll(content_location)
+            return self.poll(content_location, default_polling_time=default_polling_time)
         else:
             return response.json()
 
-    def poll(self, poll_url: str):
+    def poll(self, poll_url: str, default_polling_time: int = 120):
         error_count = 0
-        seconds = 120
+        seconds = default_polling_time
 
         while True:
             with (self.session.get(url=poll_url, headers=self.__headers()) as response):
@@ -334,7 +379,7 @@ class FhirClient:
                     self.logging.error(response.text)
                     if error_count < 3:
                         error_count += 1
-                        seconds = 120
+                        seconds = default_polling_time
                     else:
                         raise response.raise_for_status()
                 elif response.status_code == 200:
@@ -343,7 +388,7 @@ class FhirClient:
                     if 'X-Progress' in response.headers:
                         self.logging.info('X-Progress: {0}'.format(response.headers['X-Progress']))
                     retry_after = response.headers['Retry-After']
-                    self.logging.info("Retry-After: {0}".format(retry_after))
+                    self.logging.info('Retry-After: {0}'.format(retry_after))
                     if retry_after.isnumeric():
                         seconds = int(retry_after)
                     else:
@@ -354,9 +399,9 @@ class FhirClient:
                         seconds = (wait_until - datetime.now(timezone.utc)).seconds
                 else:
                     self.logging.error(str(response))
-                    raise Exception("Invalid poll response")
+                    raise Exception('Invalid poll response')
             seconds = min(seconds, 3600)
-            self.logging.info("Sleeping for %d seconds", seconds)
+            self.logging.info('Sleeping for %d seconds', seconds)
             time.sleep(seconds)
 
     def save_output(self, output):
@@ -368,16 +413,16 @@ class FhirClient:
         for entry in output['output']:
             type_ = entry['type']
             url = entry['url']
-            self.logging.info("type\t\t: %s", type_)
-            self.logging.info("url\t\t: %s", url)
+            self.logging.info('type\t\t: %s', type_)
+            self.logging.info('url\t\t: %s', url)
 
             with self.session.get(url=url, headers=self.__headers(), stream=True) as response:
                 response.raise_for_status()
 
                 file_name = url.split('/')[-1]
-                with open(file_name, "wb") as file:
+                with open(file_name, 'wb') as file:
                     file_name = stream.stream_response_to_file(response, path=file)
-            self.logging.info("wrote to\t: %s", file_name)
+            self.logging.info('wrote to\t: %s', file_name)
             file_list.append(file_name)
 
         return file_list
