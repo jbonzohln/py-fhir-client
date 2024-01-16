@@ -1,24 +1,30 @@
 import json
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 import time
+from typing import List, Any
+
 import jwt
 from requests import Response, Session
 from requests_toolbelt.downloadutils import stream
 from logging import getLogger
 
-APPLICATION_JSON_FHIR = 'application/json+fhir'
+APPLICATION_JSON_FHIR = 'application/fhir+json'
 
 
 class FhirClient:
-    def __init__(self, base_url: str = None, token: str = None, auth_type: str = None):
+    def __init__(self, base_url: str = None, token: str = None, auth_type: str = None, verify_ssl: bool = None,
+                 extra_headers: dict = None):
         self.logging = getLogger('FhirClient')
         self.base_url = base_url.removesuffix('/')
         self.token = token
         self.token_expires_at: datetime = datetime.now()
         self.refresh_token = lambda: ''
         self.auth_type = auth_type
+        self.extra_headers = extra_headers
         self.session = Session()
+        self.session.verify = verify_ssl
 
     def __enter__(self):
         return self
@@ -35,17 +41,19 @@ class FhirClient:
         return self.token
 
     def __headers(self) -> dict:
-        if self.__get_token() is not None and self.auth_type is not None:
-            return {
-                'Authorization': f'{self.auth_type} {self.__get_token()}',
-                'Accept': APPLICATION_JSON_FHIR,
-                'Content-Type': APPLICATION_JSON_FHIR
-            }
-        else:
-            return {
-                'Accept': APPLICATION_JSON_FHIR,
-                'Content-Type': APPLICATION_JSON_FHIR
-            }
+        headers = {
+            'Accept': APPLICATION_JSON_FHIR,
+            'Content-Type': f'{APPLICATION_JSON_FHIR};charset=UTF-8'
+        }
+
+        token = self.__get_token()
+        if token is not None and self.auth_type is not None:
+            headers['Authorization'] = f'{self.auth_type} {token}'
+
+        if self.extra_headers is not None:
+            headers.update(**self.extra_headers)
+
+        return headers
 
     def __async_headers(self) -> dict:
         return {
@@ -62,12 +70,20 @@ class FhirClient:
         else:
             op = self.session.post
 
+        logging.debug("%s", url)
+        logging.debug("%s", str(query_params))
+        logging.debug("%s", str(self.__headers()))
+
         with op(url=url, headers=self.__headers(), params=query_params, data=data) as response:
-            response.raise_for_status()
-            if response.content:
-                return response.json()
+            if response.ok:
+                if response.content:
+                    return response.json()
+                else:
+                    return {}
             else:
-                return {}
+                if response.content:
+                    logging.error(response.content)
+                response.raise_for_status()
 
     def __operation_on_resource(self,
                                 resource_type: str,
@@ -113,8 +129,12 @@ class FhirClient:
             op = self.session.post
 
         with op(url=url, params=query_params, headers=self.__async_headers(), data=data) as response:
-            response.raise_for_status()
-            return response
+            if response.ok:
+                return response
+            else:
+                if response.content:
+                    logging.error(response.content)
+                response.raise_for_status()
 
     def __async_operation_on_resource(self,
                                       resource_type: str,
@@ -147,13 +167,21 @@ class FhirClient:
 
     def get_metadata(self):
         with self.session.get(url=f'{self.base_url}/metadata') as response:
-            response.raise_for_status()
-            return response.json()
+            if response.ok:
+                return response.json()
+            else:
+                if response.content:
+                    logging.error(response.content)
+                response.raise_for_status()
 
     def get_smart_configuration(self):
         with self.session.get(url=f'{self.base_url}/.well-known/smart-configuration') as response:
-            response.raise_for_status()
-            return response.json()
+            if response.ok:
+                return response.json()
+            else:
+                if response.content:
+                    logging.error(response.content)
+                response.raise_for_status()
 
     def oauth(self, client_id: str = '', key_id: str = '', key: str = '', jku: str = None, algorithm: str = 'RS384'):
         smart_config = self.get_smart_configuration()
@@ -186,10 +214,25 @@ class FhirClient:
             return response.json()
 
     def read(self, resource_type: str, resource_id: str) -> dict:
-        with self.session.get(url=f'{self.base_url}/{resource_type}/{resource_id}',
-                              headers=self.__headers()) as response:
-            response.raise_for_status()
-            return response.json()
+        return self.__operation_on_resource(resource_type=resource_type,
+                                            resource_id=resource_id,
+                                            operation='')
+        # with self.session.get(url=f'{self.base_url}/{resource_type}/{resource_id}',
+        #                       headers=self.__headers()) as response:
+        #     if response.ok:
+        #         return response.json()
+        #     else:
+        #         if response.content:
+        #             logging.error(response.content)
+        #         response.raise_for_status()
+
+    def everything(self, resource_type: str, resource_id: str, count=100) -> dict:
+        return self.__operation_on_resource(resource_type=resource_type,
+                                            resource_id=resource_id,
+                                            operation='$everything',
+                                            query_params={
+                                                '_count': str(count)
+                                            })
 
     def member_remove(self, group_id: str, patient_id: str) -> dict:
         return self.mutate_group(group_id, patient_id, '$member-remove')
@@ -215,12 +258,27 @@ class FhirClient:
                                                 ]
                                             })
 
-    def search(self, resource_type: str, query_params: dict):
+    def search(self, resource_type: str, query_params: dict) -> dict:
         return self.__operation_on_resource_type(
             resource_type=resource_type,
-            operation='_search',
+            operation=None,
             query_params=query_params
         )
+
+    def match(self, resource_type: str, query_params: dict) -> dict:
+        return self.__operation_on_resource_type(
+            resource_type=resource_type,
+            operation="$match",
+            query_params=query_params
+        )
+
+    def search_next(self, search_results: dict) -> dict | None:
+        if 'resourceType' in search_results and search_results['resourceType'] == 'Bundle' and 'link' in search_results:
+            link: list = search_results['link']
+            next_urls: list[str] = [item['url'] for item in link if item['relation'] == 'next']
+            if len(next_urls) == 1:
+                return self.__operation(url=next_urls[0])
+        return None
 
     def validate(self, resource_type: str, resource, mode: str, profile: str = None):
         parameter = [
@@ -263,11 +321,15 @@ class FhirClient:
     def delete(self, resource_type: str, resource_id: str):
         with self.session.delete(url=f'{self.base_url}/{resource_type}/{resource_id}',
                                  headers=self.__headers()) as response:
-            response.raise_for_status()
-            if response.content:
-                return response.json()
+            if response.ok:
+                if response.content:
+                    return response.json()
+                else:
+                    return response.content
             else:
-                return response.content
+                if response.content:
+                    logging.error(response.content)
+                response.raise_for_status()
 
     def patient_match(self, search_criteria: dict, count: int = 3, certain_matches: bool = False) -> dict:
         return self.__operation_on_resource_type(
@@ -397,10 +459,10 @@ class FhirClient:
                         wait_until = datetime.strptime(retry_after, '%a, %d %b %Y %H:%M:%S %Z').replace(
                             tzinfo=timezone.utc)
                         seconds = (wait_until - datetime.now(timezone.utc)).seconds
-                else:
+                elif response.status_code != 202:
                     self.logging.error(str(response))
                     raise Exception('Invalid poll response')
-            seconds = min(seconds, 3600)
+            seconds = min(seconds, default_polling_time)
             self.logging.info('Sleeping for %d seconds', seconds)
             time.sleep(seconds)
 
