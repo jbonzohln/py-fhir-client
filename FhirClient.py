@@ -3,11 +3,12 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 import time
+from typing import List, Any
+from logging import getLogger
 
 import jwt
 from requests import Response, Session
 from requests_toolbelt.downloadutils import stream
-from logging import getLogger
 
 APPLICATION_JSON_FHIR = 'application/fhir+json'
 
