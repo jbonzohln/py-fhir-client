@@ -3,7 +3,6 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 import time
-from typing import List, Any
 
 import jwt
 from requests import Response, Session
@@ -217,14 +216,6 @@ class FhirClient:
         return self.__operation_on_resource(resource_type=resource_type,
                                             resource_id=resource_id,
                                             operation='')
-        # with self.session.get(url=f'{self.base_url}/{resource_type}/{resource_id}',
-        #                       headers=self.__headers()) as response:
-        #     if response.ok:
-        #         return response.json()
-        #     else:
-        #         if response.content:
-        #             logging.error(response.content)
-        #         response.raise_for_status()
 
     def everything(self, resource_type: str, resource_id: str, count=100) -> dict:
         return self.__operation_on_resource(resource_type=resource_type,
@@ -265,13 +256,6 @@ class FhirClient:
             query_params=query_params
         )
 
-    def match(self, resource_type: str, query_params: dict) -> dict:
-        return self.__operation_on_resource_type(
-            resource_type=resource_type,
-            operation="$match",
-            query_params=query_params
-        )
-
     def search_next(self, search_results: dict) -> dict | None:
         if 'resourceType' in search_results and search_results['resourceType'] == 'Bundle' and 'link' in search_results:
             link: list = search_results['link']
@@ -279,6 +263,13 @@ class FhirClient:
             if len(next_urls) == 1:
                 return self.__operation(url=next_urls[0])
         return None
+
+    def match(self, resource_type: str, query_params: dict) -> dict:
+        return self.__operation_on_resource_type(
+            resource_type=resource_type,
+            operation="$match",
+            query_params=query_params
+        )
 
     def validate(self, resource_type: str, resource, mode: str, profile: str = None):
         parameter = [
